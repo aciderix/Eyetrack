@@ -1,55 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Results } from '@mediapipe/face_mesh';
 
-type FaceMeshInstance = {
-  setOptions: (options: {
-    maxNumFaces?: number;
-    refineLandmarks?: boolean;
-    minDetectionConfidence?: number;
-    minTrackingConfidence?: number;
-  }) => void;
-  onResults: (callback: (results: Results) => void) => void;
-  send: (input: { image: HTMLVideoElement }) => Promise<void>;
-  close?: () => void;
-};
-
-type FaceMeshModule = {
-  FaceMesh: new (config: { locateFile: (path: string) => string }) => FaceMeshInstance;
-};
-
-const normalizeFaceMeshModule = (module: unknown): FaceMeshModule => {
-  if (module && typeof module === 'object') {
-    const record = module as Record<string, unknown>;
-    if (typeof (record as Partial<FaceMeshModule>).FaceMesh === 'function') {
-      return record as FaceMeshModule;
-    }
-    const defaultExport = record.default;
-    if (defaultExport && typeof defaultExport === 'object' && typeof (defaultExport as Partial<FaceMeshModule>).FaceMesh === 'function') {
-      return defaultExport as FaceMeshModule;
-    }
-  }
-  throw new Error('Le module Face Mesh chargé est invalide.');
-};
-
-let faceMeshModulePromise: Promise<FaceMeshModule> | null = null;
-
-const loadFaceMeshModule = async (): Promise<FaceMeshModule> => {
-  if (typeof window === 'undefined') {
-    throw new Error('FaceMesh n\'est disponible que dans un environnement navigateur.');
-  }
-
-  if (!faceMeshModulePromise) {
-    faceMeshModulePromise = import('@mediapipe/face_mesh')
-      .then(normalizeFaceMeshModule)
-      .catch((error) => {
-        faceMeshModulePromise = null;
-        throw error;
-      });
-  }
-
-  return faceMeshModulePromise;
-};
-
 export interface Point {
   x: number;
   y: number;
@@ -374,27 +325,11 @@ const createCalibrationTargets = (): CalibrationTarget[] => {
   return targets;
 };
 
-const waitForVideoReady = (video: HTMLVideoElement) =>
-  new Promise<void>((resolve) => {
-    if (video.readyState >= 2) {
-      resolve();
-      return;
-    }
-
-    const handleLoadedData = () => {
-      video.removeEventListener('loadeddata', handleLoadedData);
-      resolve();
-    };
-
-    video.addEventListener('loadeddata', handleLoadedData, { once: true });
-  });
-
 export const useGazeTracker = (): UseGazeTrackerResult => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const faceMeshRef = useRef<FaceMeshInstance | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
+  const faceMeshRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
 
   const [pointer, setPointer] = useState<Point | null>(null);
   const [pointerVisible, setPointerVisible] = useState(true);
@@ -420,16 +355,8 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
   const latestObservationRef = useRef<Observation | null>(null);
 
   const teardown = useCallback(() => {
-    if (animationFrameRef.current !== null) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-      videoRef.current.pause();
-    }
+    cameraRef.current?.stop?.();
+    cameraRef.current = null;
     faceMeshRef.current?.close?.();
     faceMeshRef.current = null;
     const canvasElement = canvasRef.current;
@@ -510,13 +437,21 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
   );
 
   const ensureTracker = useCallback(async () => {
+    if (faceMeshRef.current) {
+      return;
+    }
+
     if (!videoRef.current) {
       throw new Error('La vidéo n\'est pas prête.');
     }
 
-    if (!faceMeshRef.current) {
-      const faceMeshModule = await loadFaceMeshModule();
-      faceMeshRef.current = new faceMeshModule.FaceMesh({
+    try {
+      const [{ FaceMesh }, { Camera }] = await Promise.all([
+        import('@mediapipe/face_mesh'),
+        import('@mediapipe/camera_utils'),
+      ]);
+
+      faceMeshRef.current = new FaceMesh({
         locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
       });
       faceMeshRef.current.setOptions({
@@ -526,79 +461,34 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
         minTrackingConfidence: 0.5,
       });
       faceMeshRef.current.onResults(handleResults);
-    }
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      const message = 'Votre navigateur ne prend pas en charge l\'accès à la caméra.';
-      setStatus({
-        cameraReady: false,
-        trackerReady: false,
-        permissionGranted: false,
-        message,
+      cameraRef.current = new Camera(videoRef.current, {
+        onFrame: async () => {
+          if (!faceMeshRef.current) {
+            return;
+          }
+          await faceMeshRef.current.send({ image: videoRef.current });
+        },
+        width: 640,
+        height: 480,
       });
-      throw new Error(message);
-    }
+      await cameraRef.current.start();
 
-    if (!mediaStreamRef.current) {
-      setStatus({
-        cameraReady: false,
-        trackerReady: false,
-        permissionGranted: false,
-        message: "Demande d'autorisation de la caméra en cours...",
-      });
-
-      const stream = await navigator.mediaDevices
-        .getUserMedia({
-          video: { facingMode: 'user', width: 640, height: 480 },
-        })
-        .catch((error: unknown) => {
-          console.error(error);
-          setStatus({
-            cameraReady: false,
-            trackerReady: false,
-            permissionGranted: false,
-            message: "Impossible d'accéder à la caméra. Vérifiez les autorisations.",
-          });
-          throw error;
-        });
-
-      if (!stream) {
-        return;
-      }
-
-      mediaStreamRef.current = stream;
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-      await waitForVideoReady(videoRef.current);
       setStatus({
         cameraReady: true,
         trackerReady: false,
         permissionGranted: true,
-        message: 'Caméra initialisée. Positionnez votre visage dans le cadre.',
+        message: 'Caméra initialisée. Suivi en cours...',
       });
-    }
-
-    if (animationFrameRef.current === null) {
-      const renderFrame = async () => {
-        if (!videoRef.current || !faceMeshRef.current) {
-          animationFrameRef.current = null;
-          return;
-        }
-
-        await faceMeshRef.current
-          .send({ image: videoRef.current })
-          .catch((error: unknown) => {
-            console.error('Erreur lors du traitement de la frame', error);
-          });
-
-        animationFrameRef.current = requestAnimationFrame(() => {
-          void renderFrame();
-        });
-      };
-
-      animationFrameRef.current = requestAnimationFrame(() => {
-        void renderFrame();
+    } catch (error) {
+      console.error(error);
+      setStatus({
+        cameraReady: false,
+        trackerReady: false,
+        permissionGranted: false,
+        message: 'Impossible de démarrer la caméra. Vérifiez les autorisations.',
       });
+      throw error;
     }
   }, [handleResults]);
 
@@ -606,24 +496,10 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
     if (isActive) {
       return;
     }
-
-    try {
-      await ensureTracker();
-      setIsActive(true);
-      setPointer({ x: 0.5, y: 0.5 });
-      setStatus((prev) => ({
-        ...prev,
-        message: "Suivi activé. Lancez l'étalonnage pour de meilleurs résultats.",
-      }));
-    } catch (error) {
-      console.error(error);
-      setStatus({
-        cameraReady: false,
-        trackerReady: false,
-        permissionGranted: false,
-        message: "Une erreur est survenue lors de l'initialisation du suivi. Consultez la console pour plus de détails.",
-      });
-    }
+    await ensureTracker();
+    setIsActive(true);
+    setPointer({ x: 0.5, y: 0.5 });
+    setStatus((prev) => ({ ...prev, message: 'Suivi activé. Lancez l\'étalonnage pour de meilleurs résultats.' }));
   }, [ensureTracker, isActive]);
 
   const stop = useCallback(() => {
