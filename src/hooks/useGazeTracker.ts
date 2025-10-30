@@ -1,6 +1,112 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Results } from '@mediapipe/face_mesh';
 
+type FaceMeshInstance = {
+  setOptions: (options: {
+    maxNumFaces?: number;
+    refineLandmarks?: boolean;
+    minDetectionConfidence?: number;
+    minTrackingConfidence?: number;
+  }) => void;
+  onResults: (callback: (results: Results) => void) => void;
+  send: (input: { image: HTMLVideoElement }) => Promise<void>;
+  close?: () => void;
+};
+
+type FaceMeshModule = {
+  FaceMesh: new (config: { locateFile: (path: string) => string }) => FaceMeshInstance;
+};
+
+declare global {
+  interface Window {
+    faceMesh?: FaceMeshModule;
+  }
+}
+
+const FACE_MESH_SCRIPT_SRC = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
+
+let faceMeshModulePromise: Promise<FaceMeshModule> | null = null;
+
+const loadFaceMeshModule = async (): Promise<FaceMeshModule> => {
+  if (typeof window === 'undefined') {
+    throw new Error('FaceMesh n\'est disponible que dans un environnement navigateur.');
+  }
+
+  if (window.faceMesh) {
+    return window.faceMesh;
+  }
+
+  if (faceMeshModulePromise) {
+    return faceMeshModulePromise;
+  }
+
+  faceMeshModulePromise = new Promise<FaceMeshModule>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-mediapipe-face-mesh]');
+
+    const fail = (error: Error) => {
+      faceMeshModulePromise = null;
+      reject(error);
+    };
+
+    const handleReady = () => {
+      if (window.faceMesh) {
+        resolve(window.faceMesh);
+      } else {
+        fail(new Error('Le module Mediapipe Face Mesh n\'a pas été initialisé.'));
+      }
+    };
+
+    if (existingScript) {
+      const alreadyLoaded = existingScript.getAttribute('data-loaded') === 'true' || existingScript.readyState === 'complete';
+      if (alreadyLoaded) {
+        existingScript.setAttribute('data-loaded', 'true');
+        handleReady();
+        return;
+      }
+      existingScript.addEventListener(
+        'load',
+        () => {
+          existingScript.setAttribute('data-loaded', 'true');
+          handleReady();
+        },
+        { once: true }
+      );
+      existingScript.addEventListener(
+        'error',
+        () => {
+          fail(new Error('Échec du chargement du script Mediapipe Face Mesh.'));
+        },
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = FACE_MESH_SCRIPT_SRC;
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.dataset.mediapipeFaceMesh = 'true';
+    script.addEventListener(
+      'load',
+      () => {
+        script.setAttribute('data-loaded', 'true');
+        handleReady();
+      },
+      { once: true }
+    );
+    script.addEventListener(
+      'error',
+      () => {
+        fail(new Error('Échec du chargement du script Mediapipe Face Mesh.'));
+      },
+      { once: true }
+    );
+    document.body.appendChild(script);
+  });
+
+  return faceMeshModulePromise;
+};
+
 export interface Point {
   x: number;
   y: number;
@@ -466,7 +572,7 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
     }
 
     if (!faceMeshRef.current) {
-      const { FaceMesh } = await import('@mediapipe/face_mesh');
+      const { FaceMesh } = await loadFaceMeshModule();
       faceMeshRef.current = new FaceMesh({
         locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
       });
