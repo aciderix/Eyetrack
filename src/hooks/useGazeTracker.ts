@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Results } from '@mediapipe/face_mesh';
 
+
 type FaceMeshInstance = {
   setOptions: (options: {
     maxNumFaces?: number;
@@ -106,6 +107,7 @@ const loadFaceMeshModule = async (): Promise<FaceMeshModule> => {
 
   return faceMeshModulePromise;
 };
+
 
 export interface Point {
   x: number;
@@ -431,6 +433,7 @@ const createCalibrationTargets = (): CalibrationTarget[] => {
   return targets;
 };
 
+
 const waitForVideoReady = (video: HTMLVideoElement) =>
   new Promise<void>((resolve) => {
     if (video.readyState >= 2) {
@@ -446,12 +449,18 @@ const waitForVideoReady = (video: HTMLVideoElement) =>
     video.addEventListener('loadeddata', handleLoadedData, { once: true });
   });
 
+
+
 export const useGazeTracker = (): UseGazeTrackerResult => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const faceMeshRef = useRef<any>(null);
+
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+
+  const cameraRef = useRef<any>(null);
+
 
   const [pointer, setPointer] = useState<Point | null>(null);
   const [pointerVisible, setPointerVisible] = useState(true);
@@ -477,6 +486,7 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
   const latestObservationRef = useRef<Observation | null>(null);
 
   const teardown = useCallback(() => {
+
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -487,6 +497,10 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
       videoRef.current.srcObject = null;
       videoRef.current.pause();
     }
+
+    cameraRef.current?.stop?.();
+    cameraRef.current = null;
+ 
     faceMeshRef.current?.close?.();
     faceMeshRef.current = null;
     const canvasElement = canvasRef.current;
@@ -567,12 +581,28 @@ export const useGazeTracker = (): UseGazeTrackerResult => {
   );
 
   const ensureTracker = useCallback(async () => {
+ 
+
+    if (faceMeshRef.current) {
+      return;
+    }
+
+
     if (!videoRef.current) {
       throw new Error('La vidéo n\'est pas prête.');
     }
 
+
     if (!faceMeshRef.current) {
       const { FaceMesh } = await loadFaceMeshModule();
+
+    try {
+      const [{ FaceMesh }, { Camera }] = await Promise.all([
+        import('@mediapipe/face_mesh'),
+        import('@mediapipe/camera_utils'),
+      ]);
+
+
       faceMeshRef.current = new FaceMesh({
         locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
       });
