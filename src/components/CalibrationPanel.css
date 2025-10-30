@@ -1,0 +1,87 @@
+.calibration-panel {
+  background: rgba(15, 23, 42, 0.7);
+  color: #f8fafc;
+  padding: 1.5rem;
+  border-radius: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.calibration-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.calibration-instructions {
+  margin: 0.5rem 0 0;
+  color: #e2e8f0;
+}
+
+.calibration-error {
+  margin: 0;
+  color: #f87171;
+  font-weight: 600;
+}
+
+.calibration-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.calibration-actions .primary,
+.calibration-actions .secondary {
+  border-radius: 9999px;
+  padding: 0.65rem 1.5rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.15s ease;
+}
+
+.calibration-actions .primary {
+  background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.calibration-actions .primary:hover {
+  transform: translateY(-2px);
+}
+
+.calibration-actions .secondary {
+  background: rgba(226, 232, 240, 0.15);
+  color: #e2e8f0;
+}
+
+.calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.calibration-dot {
+  height: 1.5rem;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.4);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.calibration-dot.active {
+  background: #38bdf8;
+  transform: scale(1.1);
+}
+
+.calibration-helper {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.8);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.running-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
