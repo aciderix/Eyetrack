@@ -49,6 +49,15 @@ Vous pouvez relancer l'étalonnage à tout moment, notamment si vous changez de 
 - `npm run preview` : prévisualise la version de production.
 - `npm run lint` : exécute ESLint sur le dossier `src`.
 
+## Déploiement sur Netlify
+
+Pour que Netlify trouve les scripts npm, laissez le répertoire de base vide (racine du dépôt) et définissez simplement :
+
+- **Build command** : `npm run build`
+- **Publish directory** : `dist`
+
+Le fichier [`netlify.toml`](./netlify.toml) fixe également cette configuration et impose Node.js 20 pour assurer la compatibilité avec Vite.
+
 ## Licence
 
 Ce projet est distribué sous licence MIT.
